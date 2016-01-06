@@ -1,7 +1,4 @@
 #include"global.h"
-//深度好文
-//http://wenku.baidu.com/link?url=O9TE1hFXrvT23biXhQI2GgfSVUE0hD9XwVsz0m7t_7SciuVez_-3qixBsKa10qaIUOB1xMMGBLThnBI09eY0njyIZukvvbwROCLMzHkchl3
-//还没有删掉指定的Node(A),A不是叶子节点。
 typedef struct dagnode
 {
 	int id;
@@ -270,10 +267,13 @@ static int handle_if_required_node(int i)//判断是否舍弃
 	dagnode *t=block_dag_graph[i];
 	if(t->fathernum==0&&t->opr=="0"&&t->locals.empty())
 	{
-		t->exist=0;//这不就把孤立节点删去了么。
-		return 0;
+		if(!(t->relational_item&&t->relational_item->kind=="function"))
+		{
+			t->exist=0;//这不就把孤立节点删去了么。
+			return 0;
+		}
 	}
-	else if(t->fathernum==0)
+	if(t->fathernum==0)
 	{
 		t->exist=0;
 		for(int i=0;i<t->childs.size();i++)
@@ -291,7 +291,9 @@ static int find_right_node()
 	for(int j=len-1;j>=0;j--)
 	{
 		if(!block_dag_graph[j]->exist)
+		{
 			continue;
+		}
 		if(handle_if_required_node(j))
 		{
 			all_nodes.push(j);
@@ -337,7 +339,14 @@ static quadruple* create_new_quadruple_in_block(string opr,symbItem* src1,symbIt
 static symbItem* find_src_in_dag(int i)
 {
 	dagnode* t=block_dag_graph[i];
-	if(t->opr=="0"||t->opr=="inc"||t->opr=="dec"||t->opr=="neg"||basicblock_opr_kind[t->opr]==-2)
+	if(t->opr=="0"&&t->relational_item->kind=="function")
+	{
+		if(t->tmpvars.size()==0)
+			cout << "impossible" << endl;
+		else
+			return t->tmpvars[0];
+	}
+	else if(t->opr=="0"||t->opr=="inc"||t->opr=="dec"||t->opr=="neg"||basicblock_opr_kind[t->opr]==-2)
 		return t->relational_item;
 	else
 	{
@@ -458,12 +467,24 @@ static void create_new_dag_quad(int i,quadblock *block)
 		case 3:
 			new_item=create_new_quadruple_in_block(t->opr,find_src_in_dag(t->childs[0]),find_src_in_dag(t->childs[1]),find_src_in_dag(t->childs[2]));
 			add_quad_to_block(new_item,block);
-
 			break;
 		default:
+			symbItem *rela=t->relational_item;
+			if(t->relational_item&&t->relational_item->kind=="function")
+			{
+				if(t->tmpvars.size()==0)
+					cout << "impossible" << endl;
+				else
+				{
+					new_item=create_new_quadruple_in_block("assign",t->relational_item,NULL,t->tmpvars[0]);
+					add_quad_to_block(new_item,block);
+					rela=t->tmpvars[0];
+				}
+				
+			}
 			for(int i=0;i<t->locals.size();i++)
 			{
-				new_item=create_new_quadruple_in_block("assign",t->relational_item,NULL,t->locals[i]);
+				new_item=create_new_quadruple_in_block("assign",rela,NULL,t->locals[i]);
 				add_quad_to_block(new_item,block);
 			}
 	}
@@ -501,12 +522,9 @@ static void block_dag_block(quadblock* block)
 	while(t!=block->lastcode->link)
 	{
 			
-	cout <<"处理四元式的名字是:" << t->opr << endl;
 		switch(basicblock_opr_kind[t->opr]){
 			case -2:
-				cout <<"before create_new_node"<< endl;
 				create_new_node(t->opr,t->src1,NULL);
-				cout <<"end create_new_node"<<endl;
 				if(t->opr=="read")
 					symbitem_int[t->src1]=-1;
 				break;
@@ -566,9 +584,7 @@ static void block_dag_block(quadblock* block)
 					create_new_node("0",new_item,t->ans);//如果是孤立的临时变量结点，久可以不处理他了
 				}else
 				{
-					cout << "before find_or_make_father" <<endl;
 					find_or_make_father(t->opr,t->ans,NULL,adr_b,adr_c);
-					cout << "end find_or_make_fahter"<<endl;
 				}
 				break;
 			case 4:
@@ -583,8 +599,20 @@ static void block_dag_block(quadblock* block)
 				find_or_make_father(t->opr,NULL,NULL,adr_b,adr_c,adr_d);
 				break;
 			case 6:
-				if(t->opr=="writee"||t->opr=="writes"||t->opr=="rpara")
+				if(t->opr=="writee"||t->opr=="writes"||t->opr=="rpara"||t->opr=="fpara")
 				{
+					if(t->src1->name[0]=='_')
+					{
+						dagnode* dagn=block_dag_graph[symbitem_int[t->src1]];
+						for(vector<symbItem*>::iterator it=dagn->tmpvars.begin();it!=dagn->tmpvars.end();it++)
+						{
+							if(*it==t->src1)
+							{
+								dagn->locals.push_back(t->src1);
+							}
+						}
+						
+					}
 					symbitem_int[t->src1]=-1;
 				}
 				if(t->opr=="assign"&&t->src1->name[0]!='_')
@@ -597,12 +625,14 @@ static void block_dag_block(quadblock* block)
 				break;
 			case -3:
 				meet_call_code();
-
 				create_new_node(t->opr,t->src1,NULL);
-				for(int i=block_dag_graph.size()-2;(block_dag_graph[i]->opr=="fpara"||block_dag_graph[i]->opr=="rpara")&&i>=0;i--)
+				for(int i=block_dag_graph.size()-2;i>=0;i--)
 				{
-					block_dag_graph[i]->fathernum++;
-					block_dag_graph.back()->childs.push_back(i);
+					if((block_dag_graph[i]->opr=="fpara"||block_dag_graph[i]->opr=="rpara")&&block_dag_graph[i]->relational_item==t->src1)
+					{
+						block_dag_graph[i]->fathernum++;
+						block_dag_graph.back()->childs.push_back(i);
+					}
 				}
 				break;
 			case 1:
@@ -637,15 +667,12 @@ static void block_dag_block(quadblock* block)
 				find_or_make_father(t->opr,t->src1,NULL,adr_b);
 				break;
 		}
-		cout << "ok"<<endl;
 		t=t->link;
 	}
-/*	cout << "***" << endl;
+	/*cout << "***" << endl;
 	print_info();
 	cout << "***" << endl;*/
-	cout << "begin dag to quad" << endl;
 	while(find_right_node());
-	cout << "end dag to quad" << endl;
 	block->firstcode=NULL;
 	block->lastcode=NULL;
 	while(!all_nodes.empty())
@@ -667,7 +694,6 @@ static void print_block(quadblock* block)
 	printf("\n");
 	cout << endl;
 	//转..
-	block_dag_block(block);
 	quadruple *tmp=block->firstcode;
 	while(tmp!=NULL)
 	{
@@ -681,12 +707,6 @@ static void print_block(quadblock* block)
 		cout << endl;
 		tmp=tmp->link;
 	}
-	/*
-	while(tmp!=block->lastcode->link)
-	{
-		cout << tmp->opr <<endl;
-		tmp=tmp->link;
-	}*/
 }
 
 static void print_func_blocks(quadfunc *func)
@@ -771,22 +791,15 @@ void codes_to_codes()
 		int level=tmp->table->level;//function level
 		for(int i=0;i<tmp->blocknum;i++)
 		{
-			cout <<"blocknum:i:"<< i << endl;
 			block_dag_block(tmp->blocks[i]);
-			cout <<"blocknum:i"<< i << endl;
-		//judge if block in a loop
 			int loop=0;
 			for(int j=0;j<tmp->blocks[i]->subsn;j++)
 			{
 				if(tmp->blocks[i]->subsnum[j]<=i)
 				{
 					loop=1;
-//					t->blocks[i]->ifloop=1;
 				}
 			}
-		/*	if(!loop)
-				tmp->blocks[i]->ifloop=0;*/
-		//count references in each block;
 			quadruple *first=tmp->blocks[i]->firstcode;
 			quadruple *last=tmp->blocks[i]->lastcode;
 			int weight=loop?8:1;
@@ -799,11 +812,12 @@ void codes_to_codes()
 			}
 		}
 		sortMapByValue(refer_count,refers);
-		//sort and determin global register with no para
-		for(int m=0;m<refers.size()&&m<3;m++)
+		for(int m=0;m<refers.size()&&m<2;m++)
 		{
 			refers[m].first->adr=m+1;//地址分配
+			cout << refers[m].first->name << refers[m].first->adr;
 		}
+		cout << endl;
 		refer_count.clear();
 		refers.clear();
 		tmp=tmp->link;
@@ -897,9 +911,7 @@ void basicblock_func_to_block()
 	quadfunc *tmp=quadruple_codes;
 	while(tmp!=NULL)
 	{
-		cout << "aaabb" << endl;
 		func_to_block(tmp);
-		cout << "okaa" << endl;
 		tmp=tmp->link;
 	}
 

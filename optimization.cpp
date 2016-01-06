@@ -2,7 +2,7 @@
 //EBX,EDI,ESI 123
 static void sigtable_addr_alloc(quadfunc *target)
 {
-	int local_start=-16,ebxediesi=1;
+	int local_start=-16;
 	symbTable *tmptable=target->table;
 	tmptable->localsnum=0;
 	symbItem *tmpitem=tmptable->first_item;
@@ -10,9 +10,7 @@ static void sigtable_addr_alloc(quadfunc *target)
 	{
 		if(!tmpitem->adr&&tmpitem->kind=="var"||tmpitem->kind=="array"||tmpitem->kind=="arrvar")//未分配地址
 		{
-			if(ebxediesi<3&&tmpitem->kind!="array"&&tmpitem->kind!="arrvar")
-				tmpitem->adr=ebxediesi++;
-			else if(tmpitem->kind=="array")
+			if(tmpitem->kind=="array")
 			{
 				local_start-=(4*tmpitem->size);
 				tmpitem->adr=local_start+4;//数组元素递增

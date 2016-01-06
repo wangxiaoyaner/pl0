@@ -82,7 +82,18 @@ static void write_backarrvar(symbItem *a,string reg)//将reg的内容写到a所�
 
 static void hwrite_back(symbItem *a,string reg)
 {//不会有arrvar
-	if(a->level==level)
+	if(a->kind=="function")
+	{
+		if(a->level==level-1)//在自己家地盘上
+		{
+			fprintf(x86codes,"mov [ebp-4],%s\n",reg.data());
+		}
+		else
+		{
+			fprintf(x86codes,"mov eax,[ebp+%d]\nmov [eax-4],%s\n",8+4*(a->level+1),reg.data());
+		}
+	}
+	else if(a->level==level)
 	{
 		if(a->kind=="parameter")
 		{
@@ -98,7 +109,7 @@ static void hwrite_back(symbItem *a,string reg)
 		else if(a->adr%4)
 		{
 			if(a->kind=="arrvar")
-				fprintf(x86codes,"mov [%s],%s\n",adr_reg[a->adr],reg.data());
+				fprintf(x86codes,"mov [%s],%s\n",adr_reg[a->adr].data(),reg.data());
 			else
 				fprintf(x86codes,"mov %s,%s\n",adr_reg[a->adr].data(),reg.data());
 		}
@@ -206,14 +217,14 @@ static void read_reg(symbItem *a,string reg)//进来的时候不能是常数
 			if(a->type=="integer")
 			{
 				if(a->para_ifvar)
-					fprintf(x86codes,"mov eax,[ebp+%d]\nlea eax,[eax+%d]\nmov %s,[eax]\n",8+a->level*4,4+(a->level+a->adr)*4);
+					fprintf(x86codes,"mov eax,[ebp+%d]\nlea eax,[eax+%d]\nmov %s,[eax]\n",8+a->level*4,4+(a->level+a->adr)*4,reg.data());
 				else
 					fprintf(x86codes,"mov eax,[ebp+%d]\nmov %s,[eax+%d]\n",8+a->level*4,reg.data(),4+(a->level+a->adr)*4);
 			}
 			else
 			{
 				if(a->para_ifvar)
-					fprintf(x86codes,"mov eax,[ebp+%d]\nlea eax,[eax+%d]\nmovsx %s,byte [eax]\n",8+a->level*4,4+(a->level+a->adr)*4);
+					fprintf(x86codes,"mov eax,[ebp+%d]\nlea eax,[eax+%d]\nmovsx %s,byte [eax]\n",8+a->level*4,4+(a->level+a->adr)*4,reg.data());
 				else
 					fprintf(x86codes,"mov eax,[ebp+%d]\nmovsx %s,byte [eax+%d]\n",8+a->level*4,reg.data(),4+(a->level+a->adr)*4);
 
@@ -294,7 +305,6 @@ static int register_reg(symbItem* a,int write_back)//向临时寄存器池注册
 	}
 	//将要占用寄存器
 	mod_reg_pool(target,1,a,write_back);
-	cout << a->name<<target<<endl;
 	return target;
 }
 //num1,是一个计算号的寄存器值，或者内存。
@@ -312,6 +322,8 @@ static void putsrcinreg(symbItem *src,string &reg,int ifread,quadruple* tt,int w
 	if((id=checkifintmpreg(src))!=0)//src1已经存在在临时寄存器中。//扩展?
 	{
 		reg=tmpadr_reg[id];
+		if(write_back)
+			tmpregpool[id].write_back=write_back;
 	}
 	else if(src->level==level&&src->kind!="parameter"&&src->adr%4)//
 	{
@@ -427,28 +439,29 @@ display 区的构造总述如下:假定是从第 i 层模块进入到第 j 层�
 		else if(nowquad->opr=="add"||nowquad->opr=="sub"||nowquad->opr=="imul")
 		{//只需要一个寄存器就好。
 			string src1,src2,ans;
-
-
-			int ida,idb,idc;
-			ida=if_in_tmp_rag(nowquad->src1);
-			cout << nowquad->src1->name<<":"<<ida << endl;
-			idb=if_in_tmp_rag(nowquad->src2);
-			idc=if_in_tmp_rag(nowquad->ans);
 			mod_mark(nowquad);
 			if(nowquad->src1->kind=="constpool")
 				src1=nowquad->src1->name;
 			else{
 			   	putsrcinreg(nowquad->src1,src1,1,nowquad,0);
 			}
-			putsrcinreg(nowquad->ans,ans,0,nowquad,1);
 			if(nowquad->src2->kind=="constpool")
 				src2=nowquad->src2->name;
 			else putsrcinreg(nowquad->src2,src2,1,nowquad,0);
-			if(ida&&idc&&ida==idc);
+			putsrcinreg(nowquad->ans,ans,0,nowquad,1);
+			if(ans==src1&&ans==src2)
+				fprintf(x86codes,"%s %s,%s\n",nowquad->opr.data(),ans.data(),ans.data());
+			else if(src1==ans)
+			{
+				fprintf(x86codes,"%s %s,%s\n",nowquad->opr.data(),src1.data(),src2.data());
+			}
+			else if(src2==ans)
+			{
+				fprintf(x86codes,"mov eax,%s\n%s eax,%s\nmov %s,eax\n",src1.data(),
+						nowquad->opr.data(),src2.data(),ans.data());
+			}
 			else
-				fprintf(x86codes,"mov %s,%s\n",ans.data(),src1.data());
-			tmpregpool[tmpreg_adr[ans]].write_back=1;
-			fprintf(x86codes,"%s %s,%s\n",nowquad->opr.data(),ans.data(),src2.data());
+				fprintf(x86codes,"mov %s,%s\n%s %s,%s\n",ans.data(),src1.data(),nowquad->opr.data(),ans.data(),src2.data());
 		}else if(nowquad->opr=="idiv")
 		{
 			string src1,src2,ans;
@@ -749,14 +762,12 @@ display 区的构造总述如下:假定是从第 i 层模块进入到第 j 层�
 				clear_tmpregpool();
 				fprintf(x86codes,"call _scanf\nadd esp,8\n");
 				putsrcinreg(nowquad->src1,src1,0,nowquad,1);
-	
 				fprintf(x86codes,"mov %s,[esp]\n",src1.data());
 				#else
 				fprintf(x86codes,"sub esp,4\npush esp\n push strint\n");
 				clear_tmpregpool();
 				fprintf(x86codes,"call scanf\nadd esp,8\n");
 				putsrcinreg(nowquad->src1,src1,0,nowquad,1);
-	
 				fprintf(x86codes,"mov %s,[esp]\n",src1.data());
 				#endif
 
