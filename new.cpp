@@ -325,7 +325,7 @@ static void putsrcinreg(symbItem *src,string &reg,int ifread,quadruple* tt,int w
 		if(write_back)
 			tmpregpool[id].write_back=write_back;
 	}
-	else if(src->level==level&&src->kind!="parameter"&&src->adr%4)//
+	else if(src->kind!="function"&&src->level==level&&src->kind!="parameter"&&src->adr%4)//
 	{
 		reg=adr_reg[src->adr];
 	}
@@ -517,7 +517,9 @@ display 区的构造总述如下:假定是从第 i 层模块进入到第 j 层�
 			mod_mark(nowquad);
 			if(nowquad->src1->kind=="function")
 			{
-				hwrite_back(nowquad->ans,"eax");
+				putsrcinreg(nowquad->src1,src1,0,nowquad,0);
+				fprintf(x86codes,"mov %s,eax\n",src1.data());
+				hwrite_back(nowquad->ans,src1);
 			}
 			else if(nowquad->ans->kind=="function")
 			{
@@ -808,7 +810,7 @@ void generate_main()
 	init_pool();
 	for(int i=1;i<my_writes_num;i++)
 	{
-		fprintf(x86codes,"str%d: db \"%s\",0\n",i,my_write_string.front().data());
+		fprintf(x86codes,"str%d: db \"%s\",10,0\n",i,my_write_string.front().data());
 		my_write_string.pop();
 	}
 	fprintf(x86codes,"section .text\n");

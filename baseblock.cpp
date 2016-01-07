@@ -297,7 +297,7 @@ static int find_right_node()
 		if(handle_if_required_node(j))
 		{
 			all_nodes.push(j);
-			if(!block_dag_graph[j]->childs.empty())
+		/*	if(!block_dag_graph[j]->childs.empty())
 			{
 				int tmp=block_dag_graph[j]->childs[0];
 				while(block_dag_graph[tmp]->opr!="call"&&handle_if_required_node(tmp))
@@ -309,7 +309,7 @@ static int find_right_node()
 						tmp=block_dag_graph[tmp]->childs[0];
 				}
 				
-			}
+			}*/
 			return 1;
 		}
 	}
@@ -615,7 +615,7 @@ static void block_dag_block(quadblock* block)
 					}
 					symbitem_int[t->src1]=-1;
 				}
-				if(t->opr=="assign"&&t->src1->name[0]!='_')
+				if(t->opr=="assign"&&t->src1->name[0]!='_'&&t->src1->kind!="function")
 				{
 					adr_b=find_or_birth_child(t->src1);//b:=a，就得有一个a0
 				}
